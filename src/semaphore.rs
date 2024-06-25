@@ -45,7 +45,7 @@ mod tests {
         let between = Uniform::from(0..100);
         let mut rng = rand::thread_rng();
 
-        let semaphore = Arc::new(Semaphore::new(7)); // 初始计数为3的信号量
+        let semaphore = Arc::new(Semaphore::new(3)); // 初始计数为3的信号量
         let mut handles = vec![];
 
         for i in 0..10 {

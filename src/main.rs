@@ -12,8 +12,8 @@ pub struct RWLock {
 impl RWLock {
     pub fn new() -> Self {
         Self {
-            read_semaphore: Arc::new(Semaphore::new(0)), // 允许一个写操作或多个读操作
-            write_semaphore: Arc::new(Semaphore::new(0)), // 确保写操作的独占性
+            read_semaphore: Arc::new(Semaphore::new(1)), // 允许一个写操作或多个读操作
+            write_semaphore: Arc::new(Semaphore::new(1)), // 确保写操作的独占性
             readers_count: Mutex::new(0),
         }
     }
