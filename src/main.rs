@@ -1,93 +1,223 @@
-use std::sync::{Arc, Mutex};
-
+use std::cell::UnsafeCell;
+use std::ops::{Deref, DerefMut};
+use std::sync::Mutex;
 mod semaphore;
 use semaphore::Semaphore;
 
-pub struct RWLock {
-    read_semaphore: Arc<Semaphore>,
-    write_semaphore: Arc<Semaphore>,
+pub struct RWLock<T: ?Sized> {
+    read_semaphore: Semaphore,
+    write_semaphore: Semaphore,
     readers_count: Mutex<i32>,
+    data: UnsafeCell<T>,
 }
+unsafe impl<T: ?Sized + Send> Send for RWLock<T> {}
+unsafe impl<T: ?Sized + Send + Sync> Sync for RWLock<T> {}
 
-impl RWLock {
-    pub fn new() -> Self {
+impl<T> RWLock<T> {
+    pub fn new(data: T) -> Self {
         Self {
-            read_semaphore: Arc::new(Semaphore::new(1)), // 允许一个写操作或多个读操作
-            write_semaphore: Arc::new(Semaphore::new(1)), // 确保写操作的独占性
+            read_semaphore: Semaphore::new(1),
+            write_semaphore: Semaphore::new(1),
             readers_count: Mutex::new(0),
+            data: UnsafeCell::new(data),
         }
     }
 
-    //此处与课本的实现有所不同，课本的实现没有请求读信号量，而在读操作时直接请求写信号量
-    pub fn read_lock(&self) {
+    pub fn read(&self) -> RwLockReadGuard<T> {
         let mut readers = self.readers_count.lock().unwrap();
         if *readers == 0 {
-            self.write_semaphore.is_available(); // 读操作优先级低，等待写操作完成
-            self.read_semaphore.wait(); // 第一个读者等待，防止写操作
+            self.write_semaphore.is_available();
+            self.read_semaphore.wait();
         }
         *readers += 1;
+        drop(readers);
+        RwLockReadGuard { lock: self }
     }
 
-    pub fn read_unlock(&self) {
-        let mut readers = self.readers_count.lock().unwrap();
-        *readers -= 1;
-        if *readers == 0 {
-            self.read_semaphore.signal(); // 最后一个读者完成，允许写操作
-        }
-    }
-
-    
-    pub fn write_lock(&self) {
-        self.write_semaphore.wait(); // 等待写操作的独占性
-        self.read_semaphore.wait(); // 防止读操作
-    }
-
-    pub fn write_unlock(&self) {
-        self.read_semaphore.signal(); // 允许读操作
-        self.write_semaphore.signal(); // 结束写操作的独占性
+    pub fn write(&self) -> RwLockWriteGuard<T> {
+        self.write_semaphore.wait();
+        self.read_semaphore.wait();
+        RwLockWriteGuard { lock: self }
     }
 }
+
+pub struct RwLockReadGuard<'a, T> {
+    lock: &'a RWLock<T>,
+}
+
+impl<'a, T> Deref for RwLockReadGuard<'a, T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        unsafe { &*self.lock.data.get() }
+    }
+}
+
+impl<'a, T> Drop for RwLockReadGuard<'a, T> {
+    fn drop(&mut self) {
+        let mut readers = self.lock.readers_count.lock().unwrap();
+        *readers -= 1;
+        if *readers == 0 {
+            self.lock.read_semaphore.signal();
+        }
+    }
+}
+
+pub struct RwLockWriteGuard<'a, T> {
+    lock: &'a RWLock<T>,
+}
+
+impl<'a, T> Deref for RwLockWriteGuard<'a, T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        unsafe { &*self.lock.data.get() }
+    }
+}
+
+impl<'a, T> DerefMut for RwLockWriteGuard<'a, T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        unsafe { &mut *self.lock.data.get() }
+    }
+}
+
+impl<'a, T> Drop for RwLockWriteGuard<'a, T> {
+    fn drop(&mut self) {
+        self.lock.read_semaphore.signal();
+        self.lock.write_semaphore.signal();
+    }
+}
+
 fn main() {}
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
     use std::thread;
-    use std::time::Duration;
+    use std::time::{Duration, Instant};
+    //use rand::distributions::{Distribution, Uniform};
 
     #[test]
-    fn test_write_priority() {
-        use rand::distributions::{Distribution, Uniform};
+    fn test0() {
+        use std::sync::Arc;
 
-        let between = Uniform::from(0..100);
-        let mut rng = rand::thread_rng();
+        // 创建一个 `RwLock` 包裹的共享数据
+        let lock = Arc::new(RWLock::new(5));
 
-        //let time = between.sample(&mut rng); // 随机等待0~99ms
-
-        let rw_lock = Arc::new(RWLock::new());
-        let read_threads: Vec<_> = (0..5)
-            .map(|_| {
-                let rw_lock = Arc::clone(&rw_lock);
-                thread::spawn(move || {
-                    rw_lock.read_lock();
-                    // 执行读操作
-                    thread::sleep(Duration::from_secs(1));
-                    rw_lock.read_unlock();
-                })
-            })
-            .collect();
-
-        let write_thread = thread::spawn(move || {
-            rw_lock.write_lock();
-            // 执行写操作
-            thread::sleep(Duration::from_secs(2));
-            rw_lock.write_unlock();
+        // 读线程
+        let lock_clone = Arc::clone(&lock);
+        let read_thread = thread::spawn(move || {
+            let r = lock_clone.read();
+            println!("Read lock value: {}", *r);
         });
 
-        for thread in read_threads {
-            thread.join().unwrap();
+        // 写线程
+        let lock_clone = Arc::clone(&lock);
+        let write_thread = thread::spawn(move || {
+            let mut w = lock_clone.write();
+            *w += 1;
+            println!("Write lock value: {}", *w);
+        });
+
+        // 等待线程完成
+        read_thread.join().unwrap();
+        write_thread.join().unwrap();
+
+        // 最终值
+        let r = lock.read();
+        println!("Final value: {}", *r);
+    }
+
+    #[test]
+    fn test1() {
+        let reader_count = 10;
+        let writer_count = 3;
+        let lock = Arc::new(RWLock::new(5));
+        let mut handles = vec![];
+
+        let start = Instant::now();
+
+        // 创建读者线程
+        for i in 0..reader_count {
+            // 假设有5个读者
+            let lock_clone = Arc::clone(&lock);
+            let handle = thread::spawn(move || {
+                let r = lock_clone.read();
+                thread::sleep(Duration::from_millis(100)); // 读操作时间
+                println!("Read lock value: {}", *r);
+                let duration = start.elapsed();
+                println!("Reader{i} time: {:?}", duration);
+            });
+            handles.push(handle);
         }
 
-        write_thread.join().unwrap();
+        // 创建写者线程
+        for i in 0..writer_count {
+            // 假设有3个写者
+            let lock_clone = Arc::clone(&lock);
+            let handle = thread::spawn(move || {
+                let mut w = lock_clone.write();
+                thread::sleep(Duration::from_millis(200)); // 写操作时间
+                *w += 1;
+                println!("Write lock value: {}", *w);
+                let duration = start.elapsed();
+                println!("Writer{i} time: {:?}", duration);
+            });
+            handles.push(handle);
+        }
+
+        // 等待所有线程完成
+        for handle in handles {
+            handle.join().unwrap();
+        }
+
+        let duration = start.elapsed();
+        println!("Total time: {:?}", duration);
+    }
+
+    #[test]
+    fn test_writer() {
+        let reader_count = 10;
+        let writer_count = 2;
+        let lock = Arc::new(RWLock::new(5));
+        let mut handles = vec![];
+
+        let start = Instant::now();
+        // 创建写者线程
+        for i in 0..writer_count {
+            // 假设有3个写者
+            let lock_clone = Arc::clone(&lock);
+            let handle = thread::spawn(move || {
+                let mut w = lock_clone.write();
+                thread::sleep(Duration::from_millis(200)); // 写操作时间
+                *w += 1;
+                println!("Write lock value: {}", *w);
+                let duration = start.elapsed();
+                println!("Writer{i} time: {:?}", duration);
+            });
+            handles.push(handle);
+        }
+        // 创建读者线程
+        for i in 0..reader_count {
+            // 假设有5个读者
+            let lock_clone = Arc::clone(&lock);
+            let handle = thread::spawn(move || {
+                let r = lock_clone.read();
+                thread::sleep(Duration::from_millis(100)); // 读操作时间
+                println!("Read lock value: {}", *r);
+                let duration = start.elapsed();
+                println!("Reader{i} time: {:?}", duration);
+            });
+            handles.push(handle);
+        }
+
+        // 等待所有线程完成
+        for handle in handles {
+            handle.join().unwrap();
+        }
+
+        let duration = start.elapsed();
+        println!("Total time: {:?}", duration);
     }
 }

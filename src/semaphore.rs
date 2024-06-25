@@ -1,7 +1,7 @@
 use std::sync::{Condvar, Mutex};
 
 pub struct Semaphore {
-    count: Mutex<i32>, //临界资源的数目，相当于(同时访问该资源的最大线程数-1)。Mutex是互斥锁，用于保护临界资源的访问
+    count: Mutex<i32>, //临界资源的数目，相当于(同时访问该资源的最大线程数)。Mutex是互斥锁，用于保护临界资源的访问
     condvar: Condvar,  //条件变量，用于线程间的通信
 }
 
@@ -14,11 +14,11 @@ impl Semaphore {
     }
 
     pub fn wait(&self) {
-        let mut count = self.count.lock().unwrap();
-        *count -= 1;
-        // 阻塞，等待条件变量的通知，同时释放锁，遵循“让权等待”原则。得到通知后，重新获取锁，继续执行
-        // 使用 闭包(|count| *count < 0) 来防止虚假唤醒，不需要显式的 while 循环
-        let _guard = self.condvar.wait_while(count, |count| *count < 0); 
+        let mut _count = self.count.lock().unwrap();
+        *_count -= 1;
+        if *_count < 0 {
+            _count = self.condvar.wait(_count).unwrap(); // 阻塞，等待条件变量的通知，同时释放锁，遵循“让权等待”原则。得到通知后，重新获取锁，继续执行
+        }
     }
 
     pub fn signal(&self) {
@@ -28,8 +28,10 @@ impl Semaphore {
     }
 
     pub fn is_available(&self) {
-        let mut _count = self.count.lock().unwrap();
-        let _guard = self.condvar.wait_while(_count, |_count| *_count < 0);
+        let mut count = self.count.lock().unwrap();
+        while *count < 0 {
+            count = self.condvar.wait(count).unwrap(); // 阻塞，等待条件变量的通知，同时释放锁，遵循“让权等待”原则。得到通知后，重新获取锁，继续执行
+        }
     }
 }
 
@@ -42,14 +44,14 @@ mod tests {
     fn test_semaphore() {
         use rand::distributions::{Distribution, Uniform};
 
-        let between = Uniform::from(0..100);
+        let between = Uniform::from(0..100); // 随机等待0~99ms
         let mut rng = rand::thread_rng();
 
-        let semaphore = Arc::new(Semaphore::new(3)); // 初始计数为3的信号量
+        let semaphore = Arc::new(Semaphore::new(2));
         let mut handles = vec![];
 
         for i in 0..10 {
-            let time = between.sample(&mut rng); // 随机等待0~99ms
+            let time = between.sample(&mut rng); 
             let semaphore = Arc::clone(&semaphore);
             handles.push(thread::spawn(move || {
                 semaphore.wait();
@@ -64,4 +66,5 @@ mod tests {
             handle.join().unwrap();
         }
     }
+
 }
