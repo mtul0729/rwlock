@@ -16,9 +16,9 @@ impl Semaphore {
     pub fn wait(&self) {
         let mut count = self.count.lock().unwrap();
         *count -= 1;
-        while *count < 0 {
-            count = self.condvar.wait(count).unwrap(); // 阻塞，等待条件变量的通知，同时释放锁，遵循“让权等待”原则。得到通知后，重新获取锁，继续执行
-        }
+        // 阻塞，等待条件变量的通知，同时释放锁，遵循“让权等待”原则。得到通知后，重新获取锁，继续执行
+        // 使用 闭包(|count| *count < 0) 来防止虚假唤醒，不需要显式的 while 循环
+        let _guard = self.condvar.wait_while(count, |count| *count < 0); 
     }
 
     pub fn signal(&self) {
@@ -28,10 +28,8 @@ impl Semaphore {
     }
 
     pub fn is_available(&self) {
-        let mut count = self.count.lock().unwrap();
-        while *count < 0 {
-            count = self.condvar.wait(count).unwrap(); // 阻塞，等待条件变量的通知，同时释放锁，遵循“让权等待”原则。得到通知后，重新获取锁，继续执行
-        }
+        let mut _count = self.count.lock().unwrap();
+        let _guard = self.condvar.wait_while(_count, |_count| *_count < 0);
     }
 }
 
