@@ -16,7 +16,7 @@ fn main() {
     let between = Uniform::from(10..20); // 随机等待时间
     let mut rng = rand::thread_rng();
     let time = between.sample(&mut rng); // 随机等待时间
-    let tread_num = 10;
+    let tread_num = 5;
 
     let time1 = run_writer_priority(tread_num, time);
     let time2 = run_no_priority(tread_num, time);
