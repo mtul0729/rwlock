@@ -23,9 +23,7 @@ impl<T> NoPriorityRwLock<T> {
     }
 
     pub fn read(&self) -> RwLockReadGuard<T> {
-        //self.write_semaphore.pseudowait(); // 读者等待写者
         let mut readers = self.readers_count.lock().unwrap();
-        // 如果在这里调用write_semaphore.pseudowait()，会导致死锁
         if *readers == 0 {
             self.read_semaphore.wait();
         }

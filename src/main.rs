@@ -1,12 +1,11 @@
-//use core::{num, time};
 use rand::distributions::{Distribution, Uniform};
 use rand::Rng;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use std::{thread, vec};
+mod semaphore;
 
 mod no_priority_rw_lock;
-mod semaphore;
 use no_priority_rw_lock::NoPriorityRwLock;
 
 mod writer_priority_rw_lock;
@@ -36,6 +35,9 @@ impl Deref for ReaderWriterSequence {
 }
 
 //生成一个随机的布尔序列，其中true至少出现一次，并且如果只出现一次，它会出现在序列的前半部分
+//length: 序列的长度
+//rate: true出现的概率
+//用于生成随机的读者和写者序列，控制读者和写者的数量和比例
 fn generate_bool_sequence(length: usize, rate: f64) -> Vec<bool> {
     let mut rng = rand::thread_rng();
 
@@ -68,35 +70,20 @@ impl ReaderWriterSequence {
         let mut rng = rand::thread_rng();
 
         for bool in generate_bool_sequence(thread_num, 0.8) {
-            let rw_time = between.sample(&mut rng); // 随机等待时间
+            let rw_time = between.sample(&mut rng); // 随机读/写时间
             let rw_time = Duration::from_millis(rw_time);
             let rw_time = if bool {
                 RWTime::ReadTime(rw_time)
             } else {
                 RWTime::WriteTime(rw_time)
             };
-            let gap_time = between.sample(&mut rng) / 2;
+            let gap_time = between.sample(&mut rng) / 2; // 读者和写者进入的间隔时间
             let gap_time = Duration::from_millis(gap_time);
             rw_times.push(RWEntry {
                 rw_time: rw_time,
                 enter_gap: gap_time,
             });
         }
-        //至少有一个写者
-        let rw_time = between.sample(&mut rng); // 随机等待时间
-        let rw_time = Duration::from_millis(rw_time);
-        let rw_time = if rng.gen_bool(0.9) {
-            // 生成80%的读者,20%的写者
-            RWTime::ReadTime(rw_time)
-        } else {
-            RWTime::WriteTime(rw_time)
-        };
-        let gap_time = between.sample(&mut rng) / 2;
-        let gap_time = Duration::from_millis(gap_time);
-        rw_times.push(RWEntry {
-            rw_time: rw_time,
-            enter_gap: gap_time,
-        });
         ReaderWriterSequence(rw_times)
     }
 
@@ -242,6 +229,11 @@ fn main() {
         input_string.trim().parse().expect("请输入一个有效的数字")
     };
     println!("单次测试的总线程数已设置为{}。", threads_num);
+    println!("");
+    println!("测试将花费一定时间，是否立即开始测试？（按回车确认开始测试）");
+    io::stdin()
+        .read_line(&mut input_string)
+        .expect("无法读取行");
 
     let mut ratios = vec![];
 
@@ -252,23 +244,23 @@ fn main() {
         let time_with_priority = sequence.dispatch_with_writer_priority();
         let time_ratio = time_no_priority.as_secs_f64() / time_with_priority.as_secs_f64();
         println!(
-            "第{}次测试, 无优先策略时间: {:?}, 有优先策略时间: {:?}, 比例: {}",
+            "第{}次测试, 无优先策略时间: {:?}, 有优先策略时间: {:?}, 比例: {:.2}",
             i + 1,
             time_no_priority,
             time_with_priority,
             time_ratio
         );
         println!("");
+        if time_ratio.is_nan() {
+            println!("有优先策略的时间为0，无法计算比例，不计入平均值计算");
+            continue;
+        }
         ratios.push(time_ratio);
     }
     println!("每次测试的比例依次是: {:?}", ratios);
     let sum: f64 = ratios.iter().sum();
     let average = sum / ratios.len() as f64;
-    println!("");
-    println!(
-        "平均来说，无优先策略相比于写者优先策略，写者等待的时间为{}倍",
-        average
-    );
+    println!("平均比例: {}", average);
     //计算标准差
     let mut variance = 0.0;
     for ratio in ratios.iter() {
@@ -276,4 +268,10 @@ fn main() {
     }
     let standard_deviation = (variance / ratios.len() as f64).sqrt();
     println!("标准差: {}", standard_deviation);
+
+    println!("");
+    println!(
+        "平均来说，写者优先策略相比于无优先策略，写者等待的时间减少了{:.2}%",
+        (1.0 - 1.0 / average) * 100.0
+    );
 }
