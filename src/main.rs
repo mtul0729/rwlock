@@ -64,13 +64,12 @@ impl ReaderWriterSequence {
         ReaderWriterSequence(rw_times)
     }
 
-    fn dispatch_with_no_priority(&self) -> f64{
-        //TODO:应该计算写者平均等待时间
+    fn dispatch_with_no_priority(&self) -> Duration{
         let lock = Arc::new(NoPriorityRwLock::new(5));
         let mut handles = vec![];
 
         let start = Instant::now();
-        let write_done_time = Arc::new(Mutex::new(Duration::from_millis(0)));
+        let writer_wait_time = Arc::new(Mutex::new(Duration::from_millis(0)));
 
         // 创建写者与读者线程
         for (i, rw_entry) in self.iter().enumerate() {
@@ -78,21 +77,23 @@ impl ReaderWriterSequence {
             let enter_gap = rw_entry.enter_gap.clone();
             // 创建写者线程
             let wiriter_lock_clone = Arc::clone(&lock);
-            let writer_done_time = Arc::clone(&write_done_time);
+            let writer_wait_time = Arc::clone(&writer_wait_time);
             thread::sleep(enter_gap); // 读者和写者进入的间隔时间
             let writer_handle = thread::spawn(move || {
                 match rw_time {
                     RWTime::WriteTime(time) => {
+                        let start_waite = Instant::now();
                         let mut w = wiriter_lock_clone.write();
+                        let waite_time = start_waite.elapsed();
+                        println!("{}号写者等待时间为:\t {:?}", i + 1, waite_time);
+                        let mut write_wait_time = writer_wait_time.lock().unwrap();
+                        *write_wait_time += waite_time; // 累加写者等待时间
+
                         thread::sleep(time); // 写操作时间
                         *w += 1;
                         println!("{}号写者将临界资源更新为:\t {}", i + 1, *w);
                         let duration = start.elapsed();
                         println!("{}号写者完成时间为:\t {:?}", i + 1, duration);
-
-                        // 记录写者完成时间,将得到最后一个写者完成时间
-                        let mut write_done_time = writer_done_time.lock().unwrap();
-                        *write_done_time = duration;
                     }
                     RWTime::ReadTime(time) => {
                         let r = wiriter_lock_clone.read();
@@ -113,11 +114,9 @@ impl ReaderWriterSequence {
 
         let duration = start.elapsed();
         println!("所有进程用时: {:?}", duration);
-        let write_time = *write_done_time.lock().unwrap();
-        println!("最后一个写者完成时间为: {:?}", write_time);
-        let write_ratio = write_time.as_secs_f64() / duration.as_secs_f64();
-        println!("无优先的读写锁策略下写者周转时间占比为: {:.2}%", write_ratio * 100.0);
-        write_ratio
+        let writer_wait_time = writer_wait_time.lock().unwrap();
+        println!("所有写者等待时间累计: {:?}",writer_wait_time);
+        *writer_wait_time
     }
 }
 
