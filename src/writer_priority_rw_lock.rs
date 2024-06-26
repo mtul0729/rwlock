@@ -1,32 +1,7 @@
+use crate::semaphore::Semaphore;
 use std::cell::UnsafeCell;
 use std::ops::{Deref, DerefMut};
 use std::sync::Mutex;
-use crate::semaphore::Semaphore;
-
-//TODO: 分离WriterPriorityRwLock和NoPriorityRwLock的共同部分到一个trait中
-trait RwLock<T> {
-    fn read(&self) -> RwLockReadGuard<T>;
-    fn write(&self) -> RwLockWriteGuard<T>;
-}
-
-impl<T> RwLock<T> for WriterPriorityRwLock<T>{
-    fn read(&self) -> RwLockReadGuard<T> {
-        self.write_semaphore.pseudowait(); // 读者等待写者
-        let mut readers = self.readers_count.lock().unwrap();
-        // 如果在这里调用write_semaphore.pseudowait()，会导致死锁
-        if *readers == 0 {
-            self.read_semaphore.wait();
-        }
-        *readers += 1;
-        //自动释放readers_count的锁
-        RwLockReadGuard { lock: self }
-    }
-    fn write(&self) -> RwLockWriteGuard<T> {
-        self.write_semaphore.wait();
-        self.read_semaphore.wait();
-        RwLockWriteGuard { lock: self }
-    }
-}
 
 pub struct WriterPriorityRwLock<T: ?Sized> {
     read_semaphore: Semaphore,

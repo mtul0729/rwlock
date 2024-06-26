@@ -1,13 +1,12 @@
 //use core::{num, time};
 use rand::distributions::{Distribution, Uniform};
-use std::sync::{Arc, Mutex};
-use std::thread;
-use std::time::{Duration, Instant};
 use rand::Rng;
-
-mod semaphore;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
+use std::{thread, vec};
 
 mod no_priority_rw_lock;
+mod semaphore;
 use no_priority_rw_lock::NoPriorityRwLock;
 
 mod writer_priority_rw_lock;
@@ -20,7 +19,7 @@ enum RWTime {
 }
 
 use std::ops::Deref;
-#[derive(Debug,Clone)]
+#[derive(Debug, Clone)]
 struct RWEntry {
     rw_time: RWTime,
     enter_gap: Duration,
@@ -36,20 +35,42 @@ impl Deref for ReaderWriterSequence {
     }
 }
 
-impl ReaderWriterSequence {
+//生成一个随机的布尔序列，其中true至少出现一次，并且如果只出现一次，它会出现在序列的前半部分
+fn generate_bool_sequence(length: usize, rate: f64) -> Vec<bool> {
+    let mut rng = rand::thread_rng();
 
+    let mut sequence: Vec<bool> = (0..length).map(|_| rng.gen_bool(rate)).collect();
+
+    // 确保至少有一个true
+    if !sequence.contains(&true) {
+        let position = rng.gen_range(0..length / 2);
+        sequence[position] = true;
+    } else {
+        let true_count = sequence.iter().filter(|&&x| x).count();
+        if true_count == 1 {
+            let pos = sequence.iter().position(|&x| x).unwrap();
+            if pos >= length / 2 {
+                let new_position = rng.gen_range(0..length / 2);
+                sequence.swap(pos, new_position);
+            }
+        }
+    }
+
+    sequence
+}
+impl ReaderWriterSequence {
     /// 生成随机的读者和写者序列,读者和写者的数量总共为thread_num
     /// 读者和写者的比例为4:1
     /// 读者和写者的时间间隔为10-25ms
-    fn gen_rand(thread_num: u32) -> Self {
+    fn gen_rand(thread_num: usize) -> Self {
         let mut rw_times = Vec::new();
         let between = Uniform::from(10..25); // 用于生成10-25之间的随机数
         let mut rng = rand::thread_rng();
 
-        for _ in 0..thread_num {
+        for bool in generate_bool_sequence(thread_num, 0.8) {
             let rw_time = between.sample(&mut rng); // 随机等待时间
             let rw_time = Duration::from_millis(rw_time);
-            let rw_time = if rng.gen_bool(0.8) { // 生成80%的读者,20%的写者
+            let rw_time = if bool {
                 RWTime::ReadTime(rw_time)
             } else {
                 RWTime::WriteTime(rw_time)
@@ -61,10 +82,83 @@ impl ReaderWriterSequence {
                 enter_gap: gap_time,
             });
         }
+        //至少有一个写者
+        let rw_time = between.sample(&mut rng); // 随机等待时间
+        let rw_time = Duration::from_millis(rw_time);
+        let rw_time = if rng.gen_bool(0.9) {
+            // 生成80%的读者,20%的写者
+            RWTime::ReadTime(rw_time)
+        } else {
+            RWTime::WriteTime(rw_time)
+        };
+        let gap_time = between.sample(&mut rng) / 2;
+        let gap_time = Duration::from_millis(gap_time);
+        rw_times.push(RWEntry {
+            rw_time: rw_time,
+            enter_gap: gap_time,
+        });
         ReaderWriterSequence(rw_times)
     }
 
-    fn dispatch_with_no_priority(&self) -> Duration{
+    fn dispatch_with_writer_priority(&self) -> Duration {
+        println!("写者优先策略下:");
+        let lock = Arc::new(WriterPriorityRwLock::new(5));
+        let mut handles = vec![];
+
+        let start = Instant::now();
+        let writer_wait_time = Arc::new(Mutex::new(Duration::from_millis(0)));
+
+        // 创建写者与读者线程
+        for (i, rw_entry) in self.iter().enumerate() {
+            let rw_time = rw_entry.rw_time.clone();
+            let enter_gap = rw_entry.enter_gap.clone();
+            // 创建写者线程
+            let wiriter_lock_clone = Arc::clone(&lock);
+            let writer_wait_time = Arc::clone(&writer_wait_time);
+            thread::sleep(enter_gap); // 读者和写者进入的间隔时间
+            let writer_handle = thread::spawn(move || {
+                match rw_time {
+                    RWTime::WriteTime(time) => {
+                        let start_waite = Instant::now();
+                        let mut w = wiriter_lock_clone.write();
+                        let waite_time = start_waite.elapsed();
+                        println!("{}号线程（写者）等待时间为:\t {:?}", i + 1, waite_time);
+                        let mut write_wait_time = writer_wait_time.lock().unwrap();
+                        *write_wait_time += waite_time; // 累加写者等待时间
+
+                        thread::sleep(time); // 写操作时间
+                        *w += 1;
+                        println!("{}号线程（写者）将临界资源更新为:\t {}", i + 1, *w);
+                        let duration = start.elapsed();
+                        println!("{}号线程（写者）完成时间为:\t {:?}", i + 1, duration);
+                    }
+                    RWTime::ReadTime(time) => {
+                        let r = wiriter_lock_clone.read();
+                        thread::sleep(time); // 读操作时间
+                        println!("{}号线程（读者）读取得临界资源:\t {}", i + 1, *r);
+                        let duration = start.elapsed();
+                        println!("{}号线程（读者）完成时间为:\t {:?}", i + 1, duration);
+                    }
+                }
+            });
+            handles.push(writer_handle);
+        }
+
+        // 等待所有线程完成
+        for handle in handles {
+            handle.join().unwrap();
+        }
+
+        let duration = start.elapsed();
+        println!("读写用时: {:?}", duration);
+        let writer_wait_time = writer_wait_time.lock().unwrap();
+        println!("各写者等待时间累计: {:?}", writer_wait_time);
+        println!("");
+        *writer_wait_time
+    }
+
+    fn dispatch_with_no_priority(&self) -> Duration {
+        println!("无优先策略下:");
         let lock = Arc::new(NoPriorityRwLock::new(5));
         let mut handles = vec![];
 
@@ -85,22 +179,22 @@ impl ReaderWriterSequence {
                         let start_waite = Instant::now();
                         let mut w = wiriter_lock_clone.write();
                         let waite_time = start_waite.elapsed();
-                        println!("{}号写者等待时间为:\t {:?}", i + 1, waite_time);
+                        println!("{}号线程（写者）等待时间为:\t {:?}", i + 1, waite_time);
                         let mut write_wait_time = writer_wait_time.lock().unwrap();
                         *write_wait_time += waite_time; // 累加写者等待时间
 
                         thread::sleep(time); // 写操作时间
                         *w += 1;
-                        println!("{}号写者将临界资源更新为:\t {}", i + 1, *w);
+                        println!("{}号线程（写者）将临界资源更新为:\t {}", i + 1, *w);
                         let duration = start.elapsed();
-                        println!("{}号写者完成时间为:\t {:?}", i + 1, duration);
+                        println!("{}号线程（写者）完成时间为:\t {:?}", i + 1, duration);
                     }
                     RWTime::ReadTime(time) => {
                         let r = wiriter_lock_clone.read();
                         thread::sleep(time); // 读操作时间
-                        println!("{}号读者读取得临界资源:\t {}", i + 1, *r);
+                        println!("{}号线程（读者）读取得临界资源:\t {}", i + 1, *r);
                         let duration = start.elapsed();
-                        println!("{}号读者完成时间为:\t {:?}", i + 1, duration);
+                        println!("{}号线程（读者）完成时间为:\t {:?}", i + 1, duration);
                     }
                 }
             });
@@ -113,18 +207,73 @@ impl ReaderWriterSequence {
         }
 
         let duration = start.elapsed();
-        println!("所有进程用时: {:?}", duration);
+        println!("读写用时: {:?}", duration);
         let writer_wait_time = writer_wait_time.lock().unwrap();
-        println!("所有写者等待时间累计: {:?}",writer_wait_time);
+        println!("各写者等待时间累计: {:?}", writer_wait_time);
+        println!("");
         *writer_wait_time
     }
 }
 
-
+use std::io;
 fn main() {
-    //run_writer_priority(5, 1000);
-    //run_no_priority(5, 1000);
-    let sequence = ReaderWriterSequence::gen_rand(50);
-    sequence.dispatch_with_no_priority();
-}
+    let mut input_string = String::new();
+    println!("请输入测试次数（直接回车默认为30次）：");
+    // 从标准输入获得测试次数
+    io::stdin()
+        .read_line(&mut input_string)
+        .expect("无法读取行");
+    let tests_num: usize = if input_string.trim().is_empty() {
+        30 // 默认值
+    } else {
+        input_string.trim().parse().expect("请输入一个有效的数字")
+    };
+    println!("测试次数已设置为{}次。", tests_num);
 
+    input_string.clear(); // 清空字符串以便再次使用
+
+    println!("请输入单次测试的读者与写者的总线程数（直接回车默认为20）：");
+    io::stdin()
+        .read_line(&mut input_string)
+        .expect("无法读取行");
+    let threads_num: usize = if input_string.trim().is_empty() {
+        20 // 默认值
+    } else {
+        input_string.trim().parse().expect("请输入一个有效的数字")
+    };
+    println!("单次测试的总线程数已设置为{}。", threads_num);
+
+    let mut ratios = vec![];
+
+    for i in 0..tests_num {
+        println!("第{}次测试:", i + 1);
+        let sequence = ReaderWriterSequence::gen_rand(threads_num);
+        let time_no_priority = sequence.dispatch_with_no_priority();
+        let time_with_priority = sequence.dispatch_with_writer_priority();
+        let time_ratio = time_no_priority.as_secs_f64() / time_with_priority.as_secs_f64();
+        println!(
+            "第{}次测试, 无优先策略时间: {:?}, 有优先策略时间: {:?}, 比例: {}",
+            i + 1,
+            time_no_priority,
+            time_with_priority,
+            time_ratio
+        );
+        println!("");
+        ratios.push(time_ratio);
+    }
+    println!("每次测试的比例依次是: {:?}", ratios);
+    let sum: f64 = ratios.iter().sum();
+    let average = sum / ratios.len() as f64;
+    println!("");
+    println!(
+        "平均来说，无优先策略相比于写者优先策略，写者等待的时间为{}倍",
+        average
+    );
+    //计算标准差
+    let mut variance = 0.0;
+    for ratio in ratios.iter() {
+        variance += (*ratio - average).powi(2);
+    }
+    let standard_deviation = (variance / ratios.len() as f64).sqrt();
+    println!("标准差: {}", standard_deviation);
+}
