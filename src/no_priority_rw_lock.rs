@@ -3,16 +3,16 @@ use std::ops::{Deref, DerefMut};
 use std::sync::Mutex;
 use crate::semaphore::Semaphore;
 
-pub struct WriterPriorityRwLock<T: ?Sized> {
+pub struct NoPriorityRwLock<T: ?Sized> {
     read_semaphore: Semaphore,
     write_semaphore: Semaphore,
     readers_count: Mutex<i32>,
     data: UnsafeCell<T>,
 }
-unsafe impl<T: ?Sized + Send> Send for WriterPriorityRwLock<T> {}
-unsafe impl<T: ?Sized + Send + Sync> Sync for WriterPriorityRwLock<T> {}
+unsafe impl<T: ?Sized + Send> Send for NoPriorityRwLock<T> {}
+unsafe impl<T: ?Sized + Send + Sync> Sync for NoPriorityRwLock<T> {}
 
-impl<T> WriterPriorityRwLock<T> {
+impl<T> NoPriorityRwLock<T> {
     pub fn new(data: T) -> Self {
         Self {
             read_semaphore: Semaphore::new(1),
@@ -42,7 +42,7 @@ impl<T> WriterPriorityRwLock<T> {
 }
 
 pub struct RwLockReadGuard<'a, T> {
-    lock: &'a WriterPriorityRwLock<T>,
+    lock: &'a NoPriorityRwLock<T>,
 }
 
 impl<'a, T> Deref for RwLockReadGuard<'a, T> {
@@ -64,7 +64,7 @@ impl<'a, T> Drop for RwLockReadGuard<'a, T> {
 }
 
 pub struct RwLockWriteGuard<'a, T> {
-    lock: &'a WriterPriorityRwLock<T>,
+    lock: &'a NoPriorityRwLock<T>,
 }
 
 impl<'a, T> Deref for RwLockWriteGuard<'a, T> {
@@ -101,7 +101,7 @@ mod tests {
         use std::sync::Arc;
 
         // 创建一个 `RwLock` 包裹的共享数据
-        let lock = Arc::new(WriterPriorityRwLock::new(5));
+        let lock = Arc::new(NoPriorityRwLock::new(5));
 
         // 读线程
         let lock_clone = Arc::clone(&lock);
@@ -134,7 +134,7 @@ mod tests {
 
         let reader_count = 10;
         let writer_count = 3;
-        let lock = Arc::new(WriterPriorityRwLock::new(5));
+        let lock = Arc::new(NoPriorityRwLock::new(5));
         let mut handles = vec![];
 
         let start = Instant::now();
@@ -186,7 +186,7 @@ mod tests {
 
         let reader_count = 10;
         let writer_count = 1;
-        let lock = Arc::new(WriterPriorityRwLock::new(5));
+        let lock = Arc::new(NoPriorityRwLock::new(5));
         let mut handles = vec![];
 
         let start = Instant::now();
