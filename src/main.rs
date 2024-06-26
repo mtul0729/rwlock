@@ -24,9 +24,9 @@ impl<T> RWLock<T> {
     }
 
     pub fn read(&self) -> RwLockReadGuard<T> {
+        self.write_semaphore.pseudowait();
         let mut readers = self.readers_count.lock().unwrap();
         if *readers == 0 {
-            self.write_semaphore.is_available();
             self.read_semaphore.wait();
         }
         *readers += 1;
@@ -131,6 +131,11 @@ mod tests {
 
     #[test]
     fn test1() {
+        use rand::distributions::{Distribution, Uniform};
+
+        let between = Uniform::from(50..100); // 随机等待时间
+        let mut rng = rand::thread_rng();
+
         let reader_count = 10;
         let writer_count = 3;
         let lock = Arc::new(RWLock::new(5));
@@ -140,11 +145,11 @@ mod tests {
 
         // 创建读者线程
         for i in 0..reader_count {
-            // 假设有5个读者
+            let time = between.sample(&mut rng); // 随机等待时间
             let lock_clone = Arc::clone(&lock);
             let handle = thread::spawn(move || {
                 let r = lock_clone.read();
-                thread::sleep(Duration::from_millis(100)); // 读操作时间
+                thread::sleep(Duration::from_millis(time)); // 读操作时间
                 println!("Read lock value: {}", *r);
                 let duration = start.elapsed();
                 println!("Reader{i} time: {:?}", duration);
@@ -154,11 +159,11 @@ mod tests {
 
         // 创建写者线程
         for i in 0..writer_count {
-            // 假设有3个写者
+            let time = between.sample(&mut rng); // 随机等待时间
             let lock_clone = Arc::clone(&lock);
             let handle = thread::spawn(move || {
                 let mut w = lock_clone.write();
-                thread::sleep(Duration::from_millis(200)); // 写操作时间
+                thread::sleep(Duration::from_millis(time)); // 写操作时间
                 *w += 1;
                 println!("Write lock value: {}", *w);
                 let duration = start.elapsed();
@@ -178,19 +183,25 @@ mod tests {
 
     #[test]
     fn test_writer() {
+        use rand::distributions::{Distribution, Uniform};
+
+        let between = Uniform::from(50..100); // 随机等待时间
+        let mut rng = rand::thread_rng();
+
         let reader_count = 10;
-        let writer_count = 2;
+        let writer_count = 1;
         let lock = Arc::new(RWLock::new(5));
         let mut handles = vec![];
 
         let start = Instant::now();
+
         // 创建写者线程
         for i in 0..writer_count {
-            // 假设有3个写者
+            let time = between.sample(&mut rng); // 随机等待时间
             let lock_clone = Arc::clone(&lock);
             let handle = thread::spawn(move || {
                 let mut w = lock_clone.write();
-                thread::sleep(Duration::from_millis(200)); // 写操作时间
+                thread::sleep(Duration::from_millis(time)); // 写操作时间
                 *w += 1;
                 println!("Write lock value: {}", *w);
                 let duration = start.elapsed();
@@ -200,16 +211,66 @@ mod tests {
         }
         // 创建读者线程
         for i in 0..reader_count {
-            // 假设有5个读者
+            let time = between.sample(&mut rng); // 随机等待时间
             let lock_clone = Arc::clone(&lock);
             let handle = thread::spawn(move || {
                 let r = lock_clone.read();
-                thread::sleep(Duration::from_millis(100)); // 读操作时间
+                thread::sleep(Duration::from_millis(time)); // 读操作时间
                 println!("Read lock value: {}", *r);
                 let duration = start.elapsed();
                 println!("Reader{i} time: {:?}", duration);
             });
             handles.push(handle);
+        }
+
+        // 等待所有线程完成
+        for handle in handles {
+            handle.join().unwrap();
+        }
+
+        let duration = start.elapsed();
+        println!("Total time: {:?}", duration);
+    }
+
+    #[test]
+    fn test_writer2() {
+        use rand::distributions::{Distribution, Uniform};
+
+        let between = Uniform::from(50..100); // 随机等待时间
+        let mut rng = rand::thread_rng();
+
+        let count = 5;
+        let lock = Arc::new(RWLock::new(5));
+        let mut handles = vec![];
+
+        let start = Instant::now();
+
+        // 创建写者与读者线程
+        for i in 0..count {
+            // 创建写者线程
+            let time = between.sample(&mut rng); // 随机等待时间
+            let wiriter_lock_clone = Arc::clone(&lock);
+            let writer_handle = thread::spawn(move || {
+                let mut w = wiriter_lock_clone.write();
+                thread::sleep(Duration::from_millis(time)); // 写操作时间
+                *w += 1;
+                println!("Write lock value: {}", *w);
+                let duration = start.elapsed();
+                println!("Writer{i} time: {:?}", duration);
+            });
+            handles.push(writer_handle);
+
+            // 创建读者线程
+            let time = between.sample(&mut rng); // 随机等待时间
+            let reader_lock_clone = Arc::clone(&lock);
+            let reader_handle = thread::spawn(move || {
+                let r = reader_lock_clone.read();
+                thread::sleep(Duration::from_millis(time)); // 读操作时间
+                println!("Read lock value: {}", *r);
+                let duration = start.elapsed();
+                println!("Reader{i} time: {:?}", duration);
+            });
+            handles.push(reader_handle);
         }
 
         // 等待所有线程完成
