@@ -42,14 +42,21 @@ mod tests {
     use super::*;
     use std::sync::Arc;
     use std::thread;
+
     #[test]
-    fn test_semaphore() {
+    fn test_count(){ // 测试不同临界资源数目的情况
+        for count in 1..10 {
+            test_semaphore(count);
+        }
+    }
+
+    fn test_semaphore(count: i32) {
         use rand::distributions::{Distribution, Uniform};
 
-        let between = Uniform::from(50..100); // 随机等待时间
+        let between = Uniform::from(10..20); // 随机等待时间
         let mut rng = rand::thread_rng();
 
-        let semaphore = Arc::new(Semaphore::new(2));
+        let semaphore = Arc::new(Semaphore::new(count));
         let mut handles = vec![];
 
         for i in 0..10 {
@@ -67,6 +74,7 @@ mod tests {
         for handle in handles {
             handle.join().unwrap();
         }
+        println!("All threads are done\n");
     }
 
 }
