@@ -115,7 +115,7 @@ impl ReaderWriterSequence {
 
                         thread::sleep(time); // 写操作时间
                         *w += 1;
-                        println!("{}号线程（写者）将临界资源更新为:\t {}", i + 1, *w);
+                        println!("{}号线程（写者）更新临界资源为:\t {}", i + 1, *w);
                         let duration = start.elapsed();
                         println!("{}号线程（写者）完成时间为:\t {:?}", i + 1, duration);
                     }
@@ -137,9 +137,9 @@ impl ReaderWriterSequence {
         }
 
         let duration = start.elapsed();
-        println!("读写用时: {:?}", duration);
+        println!("读写用时:\t\t {:?}", duration);
         let writer_wait_time = writer_wait_time.lock().unwrap();
-        println!("各写者等待时间累计: {:?}", writer_wait_time);
+        println!("各写者等待时间累计:\t {:?}", writer_wait_time);
         println!("");
         *writer_wait_time
     }
@@ -172,7 +172,7 @@ impl ReaderWriterSequence {
 
                         thread::sleep(time); // 写操作时间
                         *w += 1;
-                        println!("{}号线程（写者）将临界资源更新为:\t {}", i + 1, *w);
+                        println!("{}号线程（写者）更新临界资源为:\t {}", i + 1, *w);
                         let duration = start.elapsed();
                         println!("{}号线程（写者）完成时间为:\t {:?}", i + 1, duration);
                     }
@@ -194,9 +194,9 @@ impl ReaderWriterSequence {
         }
 
         let duration = start.elapsed();
-        println!("读写用时: {:?}", duration);
+        println!("读写用时:\t\t {:?}", duration);
         let writer_wait_time = writer_wait_time.lock().unwrap();
-        println!("各写者等待时间累计: {:?}", writer_wait_time);
+        println!("各写者等待时间累计:\t {:?}", writer_wait_time);
         println!("");
         *writer_wait_time
     }
@@ -204,9 +204,12 @@ impl ReaderWriterSequence {
 
 use std::io;
 fn main() {
+    println!("-------------------------------------------------");
+    println!("\t读者写者问题模拟程序");
+    println!("");
     let mut input_string = String::new();
-    println!("请输入测试次数（直接回车默认为30次）：");
-    // 从标准输入获得测试次数
+    println!("请输入模拟次数（直接回车默认为30次）：");
+    // 从标准输入获得模拟次数
     io::stdin()
         .read_line(&mut input_string)
         .expect("无法读取行");
@@ -215,11 +218,11 @@ fn main() {
     } else {
         input_string.trim().parse().expect("请输入一个有效的数字")
     };
-    println!("测试次数已设置为{}次。", tests_num);
+    println!("模拟次数已设置为{}次。", tests_num);
 
     input_string.clear(); // 清空字符串以便再次使用
 
-    println!("请输入单次测试的读者与写者的总线程数（直接回车默认为20）：");
+    println!("请输入单次模拟的读者与写者的总线程数（直接回车默认为20）：");
     io::stdin()
         .read_line(&mut input_string)
         .expect("无法读取行");
@@ -228,9 +231,10 @@ fn main() {
     } else {
         input_string.trim().parse().expect("请输入一个有效的数字")
     };
-    println!("单次测试的总线程数已设置为{}。", threads_num);
-    println!("");
-    println!("测试将花费一定时间，是否立即开始测试？（按回车确认开始测试）");
+    println!("单次模拟的总线程数已设置为{}。", threads_num);
+    println!("-------------------------------------------------");
+    println!("模拟将花费一定时间，是否立即开始？（按回车确认开始）");
+    input_string.clear();
     io::stdin()
         .read_line(&mut input_string)
         .expect("无法读取行");
@@ -238,13 +242,13 @@ fn main() {
     let mut ratios = vec![];
 
     for i in 0..tests_num {
-        println!("第{}次测试:", i + 1);
+        println!("第{}次模拟:", i + 1);
         let sequence = ReaderWriterSequence::gen_rand(threads_num);
         let time_no_priority = sequence.dispatch_with_no_priority();
         let time_with_priority = sequence.dispatch_with_writer_priority();
         let time_ratio = time_no_priority.as_secs_f64() / time_with_priority.as_secs_f64();
         println!(
-            "第{}次测试, 无优先策略时间: {:?}, 有优先策略时间: {:?}, 比例: {:.2}",
+            "第{}次模拟, 无优先策略时间: {:?}, 有优先策略时间: {:?}, 比例: {:.2}",
             i + 1,
             time_no_priority,
             time_with_priority,
@@ -257,21 +261,28 @@ fn main() {
         }
         ratios.push(time_ratio);
     }
-    println!("每次测试的比例依次是: {:?}", ratios);
+    println!("-------------------------------------------------");
+    println!("每次模拟的比例依次是: {:?}", ratios);
     let sum: f64 = ratios.iter().sum();
     let average = sum / ratios.len() as f64;
-    println!("平均比例: {}", average);
+    println!("平均比例:\t {}", average);
     //计算标准差
     let mut variance = 0.0;
     for ratio in ratios.iter() {
         variance += (*ratio - average).powi(2);
     }
     let standard_deviation = (variance / ratios.len() as f64).sqrt();
-    println!("标准差: {}", standard_deviation);
+    println!("标准差:\t {}", standard_deviation);
 
     println!("");
     println!(
         "平均来说，写者优先策略相比于无优先策略，写者等待的时间减少了{:.2}%",
         (1.0 - 1.0 / average) * 100.0
     );
+    println!("-------------------------------------------------");
+    println!("模拟结束，按回车键退出程序。");
+    input_string.clear();
+    io::stdin()
+        .read_line(&mut input_string)
+        .expect("无法读取行");
 }
