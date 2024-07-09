@@ -1,7 +1,7 @@
+use crate::semaphore::Semaphore;
 use std::cell::UnsafeCell;
 use std::ops::{Deref, DerefMut};
 use std::sync::Mutex;
-use crate::semaphore::Semaphore;
 
 pub struct WriterPriorityRwLock<T: ?Sized> {
     read_semaphore: Semaphore,
