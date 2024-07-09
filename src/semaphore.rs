@@ -44,7 +44,8 @@ mod tests {
     use std::thread;
 
     #[test]
-    fn test_count(){ // 测试不同临界资源数目的情况
+    fn test_count() {
+        // 测试不同临界资源数目的情况
         for count in 1..10 {
             test_semaphore(count);
         }
@@ -60,7 +61,7 @@ mod tests {
         let mut handles = vec![];
 
         for i in 0..10 {
-            let time = between.sample(&mut rng); 
+            let time = between.sample(&mut rng);
             let semaphore = Arc::clone(&semaphore);
             handles.push(thread::spawn(move || {
                 semaphore.wait();
@@ -76,5 +77,4 @@ mod tests {
         }
         println!("All threads are done\n");
     }
-
 }

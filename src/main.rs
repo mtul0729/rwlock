@@ -3,13 +3,9 @@ use rand::Rng;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use std::{thread, vec};
+mod rw_lock;
 mod semaphore;
-
-mod no_priority_rw_lock;
-use no_priority_rw_lock::NoPriorityRwLock;
-
-mod writer_priority_rw_lock;
-use writer_priority_rw_lock::WriterPriorityRwLock;
+use rw_lock::{NoPriorityRwLock, WriterPriorityRwLock};
 
 #[derive(Debug, Clone)]
 enum RWTime {

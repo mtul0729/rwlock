@@ -1,49 +1,71 @@
+use crate::semaphore::Semaphore;
 use std::cell::UnsafeCell;
 use std::ops::{Deref, DerefMut};
 use std::sync::Mutex;
-use crate::semaphore::Semaphore;
+pub trait RwLockPolicy {
+    fn before_read(semaphore: &Semaphore);
+}
 
-pub struct NoPriorityRwLock<T: ?Sized> {
+pub struct NoPriorityPolicy;
+
+impl RwLockPolicy for NoPriorityPolicy {
+    fn before_read(_: &Semaphore) {
+        // No-op for no priority
+    }
+}
+
+pub struct WriterPriorityPolicy;
+
+impl RwLockPolicy for WriterPriorityPolicy {
+    fn before_read(semaphore: &Semaphore) {
+        semaphore.pseudowait(); // 读者等待写者
+    }
+}
+
+pub struct RwLock<T: ?Sized, P: RwLockPolicy> {
     read_semaphore: Semaphore,
     write_semaphore: Semaphore,
     readers_count: Mutex<i32>,
+    _policy: std::marker::PhantomData<P>,
     data: UnsafeCell<T>,
 }
-unsafe impl<T: ?Sized + Send> Send for NoPriorityRwLock<T> {}
-unsafe impl<T: ?Sized + Send + Sync> Sync for NoPriorityRwLock<T> {}
 
-impl<T> NoPriorityRwLock<T> {
+unsafe impl<T: ?Sized + Send, P: RwLockPolicy> Send for RwLock<T, P> {}
+unsafe impl<T: ?Sized + Send + Sync, P: RwLockPolicy> Sync for RwLock<T, P> {}
+
+impl<T, P: RwLockPolicy> RwLock<T, P> {
     pub fn new(data: T) -> Self {
         Self {
             read_semaphore: Semaphore::new(1),
             write_semaphore: Semaphore::new(1),
             readers_count: Mutex::new(0),
+            _policy: std::marker::PhantomData,
             data: UnsafeCell::new(data),
         }
     }
 
-    pub fn read(&self) -> RwLockReadGuard<T> {
+    pub fn read(&self) -> RwLockReadGuard<T, P> {
+        P::before_read(&self.write_semaphore);
         let mut readers = self.readers_count.lock().unwrap();
         if *readers == 0 {
             self.read_semaphore.wait();
         }
         *readers += 1;
-        //自动释放readers_count的锁
         RwLockReadGuard { lock: self }
     }
 
-    pub fn write(&self) -> RwLockWriteGuard<T> {
+    pub fn write(&self) -> RwLockWriteGuard<T, P> {
         self.write_semaphore.wait();
         self.read_semaphore.wait();
         RwLockWriteGuard { lock: self }
     }
 }
 
-pub struct RwLockReadGuard<'a, T> {
-    lock: &'a NoPriorityRwLock<T>,
+pub struct RwLockReadGuard<'a, T, P: RwLockPolicy> {
+    lock: &'a RwLock<T, P>,
 }
 
-impl<'a, T> Deref for RwLockReadGuard<'a, T> {
+impl<'a, T, P: RwLockPolicy> Deref for RwLockReadGuard<'a, T, P> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
@@ -51,7 +73,7 @@ impl<'a, T> Deref for RwLockReadGuard<'a, T> {
     }
 }
 
-impl<'a, T> Drop for RwLockReadGuard<'a, T> {
+impl<'a, T, P: RwLockPolicy> Drop for RwLockReadGuard<'a, T, P> {
     fn drop(&mut self) {
         let mut readers = self.lock.readers_count.lock().unwrap();
         *readers -= 1;
@@ -61,11 +83,11 @@ impl<'a, T> Drop for RwLockReadGuard<'a, T> {
     }
 }
 
-pub struct RwLockWriteGuard<'a, T> {
-    lock: &'a NoPriorityRwLock<T>,
+pub struct RwLockWriteGuard<'a, T, P: RwLockPolicy> {
+    lock: &'a RwLock<T, P>,
 }
 
-impl<'a, T> Deref for RwLockWriteGuard<'a, T> {
+impl<'a, T, P: RwLockPolicy> Deref for RwLockWriteGuard<'a, T, P> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
@@ -73,18 +95,21 @@ impl<'a, T> Deref for RwLockWriteGuard<'a, T> {
     }
 }
 
-impl<'a, T> DerefMut for RwLockWriteGuard<'a, T> {
+impl<'a, T, P: RwLockPolicy> DerefMut for RwLockWriteGuard<'a, T, P> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         unsafe { &mut *self.lock.data.get() }
     }
 }
 
-impl<'a, T> Drop for RwLockWriteGuard<'a, T> {
+impl<'a, T, P: RwLockPolicy> Drop for RwLockWriteGuard<'a, T, P> {
     fn drop(&mut self) {
         self.lock.read_semaphore.signal();
         self.lock.write_semaphore.signal();
     }
 }
+
+pub type NoPriorityRwLock<T> = RwLock<T, NoPriorityPolicy>;
+pub type WriterPriorityRwLock<T> = RwLock<T, WriterPriorityPolicy>;
 
 #[cfg(test)]
 mod tests {
