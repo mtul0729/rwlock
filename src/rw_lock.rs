@@ -38,6 +38,7 @@ unsafe impl<T: ?Sized + Send, P: RwLockPolicy> Send for RwLock<T, P> {}
 unsafe impl<T: ?Sized + Send + Sync, P: RwLockPolicy> Sync for RwLock<T, P> {}
 
 impl<T, P: RwLockPolicy> RwLock<T, P> {
+    /// 创建0-1信号量
     pub fn new(data: T) -> Self {
         Self {
             read_semaphore: Semaphore::new(1),
@@ -69,7 +70,7 @@ pub struct RwLockReadGuard<'a, T, P: RwLockPolicy> {
     lock: &'a RwLock<T, P>,
 }
 
-impl<'a, T, P: RwLockPolicy> Deref for RwLockReadGuard<'a, T, P> {
+impl<T, P: RwLockPolicy> Deref for RwLockReadGuard<'_, T, P> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
@@ -77,7 +78,7 @@ impl<'a, T, P: RwLockPolicy> Deref for RwLockReadGuard<'a, T, P> {
     }
 }
 
-impl<'a, T, P: RwLockPolicy> Drop for RwLockReadGuard<'a, T, P> {
+impl<T, P: RwLockPolicy> Drop for RwLockReadGuard<'_, T, P> {
     fn drop(&mut self) {
         let mut readers = self.lock.readers_count.lock().unwrap();
         *readers -= 1;
@@ -91,7 +92,7 @@ pub struct RwLockWriteGuard<'a, T, P: RwLockPolicy> {
     lock: &'a RwLock<T, P>,
 }
 
-impl<'a, T, P: RwLockPolicy> Deref for RwLockWriteGuard<'a, T, P> {
+impl<T, P: RwLockPolicy> Deref for RwLockWriteGuard<'_, T, P> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
@@ -99,13 +100,13 @@ impl<'a, T, P: RwLockPolicy> Deref for RwLockWriteGuard<'a, T, P> {
     }
 }
 
-impl<'a, T, P: RwLockPolicy> DerefMut for RwLockWriteGuard<'a, T, P> {
+impl<T, P: RwLockPolicy> DerefMut for RwLockWriteGuard<'_, T, P> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         unsafe { &mut *self.lock.data.get() }
     }
 }
 
-impl<'a, T, P: RwLockPolicy> Drop for RwLockWriteGuard<'a, T, P> {
+impl<T, P: RwLockPolicy> Drop for RwLockWriteGuard<'_, T, P> {
     fn drop(&mut self) {
         self.lock.read_semaphore.signal();
         self.lock.write_semaphore.signal();

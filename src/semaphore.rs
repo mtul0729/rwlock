@@ -6,6 +6,7 @@ pub struct Semaphore {
 }
 
 impl Semaphore {
+    /// 当`count = 1`时，即为0-1信号量，类似于`Mutex`，但是`Mutex`没有提供类似`pseudowait()`的方法，只能通过`lock()`后直接`drop()的方式`实现类似功能。
     pub fn new(count: i32) -> Self {
         Self {
             count: Mutex::new(count),
@@ -13,6 +14,7 @@ impl Semaphore {
         }
     }
 
+    /// 申请锁
     pub fn wait(&self) {
         let mut count = self.count.lock().unwrap();
         while *count <= 0 {
@@ -21,16 +23,18 @@ impl Semaphore {
         *count -= 1;
     }
 
+    /// 通知所有等待的线程，是否唤醒由对方决定。
+    /// 写锁释放时，确保同时唤醒正在`wait()`的writer和正在`pseudowait()`的reader。
     pub fn signal(&self) {
         let mut count = self.count.lock().unwrap();
         *count += 1;
         if *count > 0 {
-            // 通知所有等待的线程
-            // 为什么不能改用notify_one()？ 因为有pseudowait的存在，notify_all()才能保证同时唤醒reader和writer
             self.condvar.notify_all();
         }
     }
 
+    /// 由reader调用，用于确认写锁可申请。
+    /// 与`wait()`相似，但不修改count，即不干扰其他线程申请写锁。
     pub fn pseudowait(&self) {
         let mut count = self.count.lock().unwrap();
         while *count <= 0 {

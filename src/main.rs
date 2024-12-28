@@ -76,7 +76,7 @@ impl ReaderWriterSequence {
             let gap_time = between.sample(&mut rng) / 2; // 读者和写者进入的间隔时间
             let gap_time = Duration::from_millis(gap_time);
             rw_times.push(RWEntry {
-                rw_time: rw_time,
+                rw_time,
                 enter_gap: gap_time,
             });
         }
@@ -94,7 +94,7 @@ impl ReaderWriterSequence {
         // 创建写者与读者线程
         for (i, rw_entry) in self.iter().enumerate() {
             let rw_time = rw_entry.rw_time.clone();
-            let enter_gap = rw_entry.enter_gap.clone();
+            let enter_gap = rw_entry.enter_gap;
             // 创建写者线程
             let wiriter_lock_clone = Arc::clone(&lock);
             let writer_wait_time = Arc::clone(&writer_wait_time);
@@ -136,7 +136,7 @@ impl ReaderWriterSequence {
         println!("读写用时:\t\t {:?}", duration);
         let writer_wait_time = writer_wait_time.lock().unwrap();
         println!("各写者等待时间累计:\t {:?}", writer_wait_time);
-        println!("");
+        println!();
         *writer_wait_time
     }
 
@@ -151,7 +151,7 @@ impl ReaderWriterSequence {
         // 创建写者与读者线程
         for (i, rw_entry) in self.iter().enumerate() {
             let rw_time = rw_entry.rw_time.clone();
-            let enter_gap = rw_entry.enter_gap.clone();
+            let enter_gap = rw_entry.enter_gap;
             // 创建写者线程
             let wiriter_lock_clone = Arc::clone(&lock);
             let writer_wait_time = Arc::clone(&writer_wait_time);
@@ -193,7 +193,7 @@ impl ReaderWriterSequence {
         println!("读写用时:\t\t {:?}", duration);
         let writer_wait_time = writer_wait_time.lock().unwrap();
         println!("各写者等待时间累计:\t {:?}", writer_wait_time);
-        println!("");
+        println!();
         *writer_wait_time
     }
 }
@@ -202,7 +202,7 @@ use std::io;
 fn main() {
     println!("-------------------------------------------------");
     println!("\t读者写者问题模拟程序");
-    println!("");
+    println!();
     let mut input_string = String::new();
     println!("请输入模拟次数（直接回车默认为30次）：");
     // 从标准输入获得模拟次数
@@ -250,7 +250,7 @@ fn main() {
             time_with_priority,
             time_ratio
         );
-        println!("");
+        println!();
         if time_ratio.is_nan() {
             println!("有优先策略的时间为0，无法计算比例，不计入平均值计算");
             continue;
@@ -270,7 +270,7 @@ fn main() {
     let standard_deviation = (variance / ratios.len() as f64).sqrt();
     println!("标准差:\t {}", standard_deviation);
 
-    println!("");
+    println!();
     println!(
         "平均来说，写者优先策略相比于无优先策略，写者等待的时间减少了{:.2}%",
         (1.0 - 1.0 / average) * 100.0
