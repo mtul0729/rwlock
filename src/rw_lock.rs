@@ -2,10 +2,13 @@ use crate::semaphore::Semaphore;
 use std::cell::UnsafeCell;
 use std::ops::{Deref, DerefMut};
 use std::sync::Mutex;
+
+/// 读写锁的优先策略
 pub trait RwLockPolicy {
     fn before_read(semaphore: &Semaphore);
 }
 
+/// 无优先策略
 pub struct NoPriorityPolicy;
 
 impl RwLockPolicy for NoPriorityPolicy {
@@ -14,6 +17,7 @@ impl RwLockPolicy for NoPriorityPolicy {
     }
 }
 
+/// 写者优先策略
 pub struct WriterPriorityPolicy;
 
 impl RwLockPolicy for WriterPriorityPolicy {

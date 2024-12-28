@@ -14,25 +14,27 @@ impl Semaphore {
     }
 
     pub fn wait(&self) {
-        let mut _count = self.count.lock().unwrap();
-        while *_count <= 0 {
-            _count = self.condvar.wait(_count).unwrap(); // 阻塞，等待条件变量的通知，同时释放锁，遵循“让权等待”原则。得到通知后，重新获取锁，继续执行
+        let mut count = self.count.lock().unwrap();
+        while *count <= 0 {
+            count = self.condvar.wait(count).unwrap();
         }
-        *_count -= 1;
+        *count -= 1;
     }
 
     pub fn signal(&self) {
         let mut count = self.count.lock().unwrap();
         *count += 1;
         if *count > 0 {
-            self.condvar.notify_all(); // 通知所有等待的线程
+            // 通知所有等待的线程
+            // 为什么不能改用notify_one()？ 因为有pseudowait的存在，notify_all()才能保证同时唤醒reader和writer
+            self.condvar.notify_all();
         }
     }
 
     pub fn pseudowait(&self) {
         let mut count = self.count.lock().unwrap();
         while *count <= 0 {
-            count = self.condvar.wait(count).unwrap(); // 阻塞，等待条件变量的通知，同时释放锁，遵循“让权等待”原则。得到通知后，重新获取锁，继续执行
+            count = self.condvar.wait(count).unwrap();
         }
     }
 }
